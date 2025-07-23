@@ -65,7 +65,6 @@
             right: 1rem;
             z-index: 1050;
             min-width: 300px;
-            display: none;
         }
 
         .nav-tabs .nav-link {
@@ -85,10 +84,10 @@
         </header>
 
         <!-- 状态/通知区域 -->
-        <div id="status-area" class="alert alert-dismissible fade show" role="alert">
-            <span id="status-message"></span>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <div id="status-area">
+            <!-- Toast 容器, JS会动态添加内容 -->
         </div>
+
 
         <!-- 核心功能区: 双栏布局 -->
         <div class="row g-4">
@@ -101,7 +100,7 @@
                             <div class="mb-3"><label for="video-file" class="form-label">上传 MP4/MP3 文件</label><input type="file" class="form-control" id="video-file" name="file" accept=".mp4,.mp3" required></div>
                             <div class="row">
                                 <div class="col-md-6 mb-3"><label for="language" class="form-label">源语言</label><select class="form-select" id="language" name="language" required><option value="Chinese">中文</option><option value="English">English</option><option value="Japanese" selected>Japanese</option></select></div>
-                                <div class="col-md-6 mb-3"><label for="model" class="form-label">Whisper 模型</label><select class="form-select" id="model" name="model" required><option value="tiny">tiny</option><option value="base" selected>base</option><option value="small">small</option><option value="medium">medium</option><option value="large_v3">large_v3</option></select></div>
+                                <div class="col-md-6 mb-3"><label for="model" class="form-label">Whisper 模型</label><select class="form-select" id="model" name="model" required><option value="tiny">tiny</option><option value="base" selected>base</option><option value="small">small</option><option value="medium">medium</option><option value="large-v3">large-v3</option></select></div>
                             </div>
                             <button type="submit" class="btn btn-primary w-100"><span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true" style="display: none;"></span>开始生成</button>
                         </form>
@@ -118,7 +117,7 @@
                             <div class="mb-3"><label for="srt-file" class="form-label">上传 SRT 字幕文件</label><input type="file" class="form-control" id="srt-file" name="file" accept=".srt" required></div>
                             <div class="input-group mb-3">
                                 <span class="input-group-text">Ollama Host</span>
-                                <input type="text" class="form-control" id="ollama-host" name="ollama_host" placeholder="例如: 192.168.1.101" required>
+                                <input type="text" class="form-control" id="ollama-host" name="ollama_host" placeholder="例如: 127.0.0.1" required>
                                 <button type="button" id="fetch-models-btn" class="btn btn-outline-secondary">获取模型</button>
                             </div>
                             <div class="mb-3">
@@ -126,7 +125,7 @@
                                 <select class="form-select" id="ollama-model" name="ollama_model" required><option value="">请先获取模型</option></select>
                             </div>
                             <button type="submit" class="btn btn-success w-100">开始翻译</button>
-                            <div id="translate-progress-container" class="progress-container mt-3">
+                            <div id="translate-progress-container" class="progress-container mt-3" style="display: none;">
                                 <div class="progress"><div id="translate-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%"></div></div>
                             </div>
                         </form>
@@ -176,85 +175,40 @@
     $(document).ready(function() {
         let pollInterval;
 
+        // --- 辅助函数定义 ---
+        
+        /**
+         * 显示一个短暂的状态通知 (Toast)
+         * @param {string} message - 要显示的消息
+         * @param {string} type - 状态类型 (info, success, danger, warning)
+         */
         function showStatus(message, type = 'info') {
             const statusArea = $('#status-area');
-            const statusMessage = $('#status-message');
-            
-            statusMessage.html(message);
-            statusArea.removeClass('alert-info alert-success alert-danger alert-warning').addClass(`alert-${type}`);
-            
-            // 使用Bootstrap的Toast显示逻辑
-            const toast = new bootstrap.Toast(statusArea, { delay: 5000 });
+            // 为了每次都能重新触发，先清空再添加
+            statusArea.empty(); 
+            const alertHtml = `
+                <div class="toast show" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="5000">
+                    <div class="toast-header alert-${type}">
+                        <strong class="me-auto">${type.charAt(0).toUpperCase() + type.slice(1)}</strong>
+                        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                </div>`;
+            statusArea.append(alertHtml);
+            const toastElement = statusArea.find('.toast');
+            const toast = new bootstrap.Toast(toastElement);
             toast.show();
         }
         
         function disableForms() { $('button, form input, form select').prop('disabled', true); }
         function enableForms() { $('button, form input, form select').prop('disabled', false); }
-
-        $('#transcribe-form').on('submit', function(e) { /* ... */ });
-        $('#translate-form').on('submit', function(e) { /* ... */ });
-        $('#fetch-models-btn').on('click', function() { /* ... */ });
-
-        function setupFileManagement(type) { /* ... */ }
-
-        const fetchOutputsFiles = setupFileManagement('outputs');
-        const fetchUploadsFiles = setupFileManagement('uploads');
-        fetchOutputsFiles();
-        fetchUploadsFiles();
-
-        // --- Refill logic ---
-        $('#transcribe-form').on('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            const spinner = $(this).find('.spinner-border');
-            disableForms();
-            spinner.show();
-            $.ajax({
-                url: '/transcribe', type: 'POST', data: formData, processData: false, contentType: false,
-                success: function(response) {
-                    if (response.success) {
-                        showStatus(`转录成功: ${response.filename}`, 'success');
-                        fetchOutputsFiles(); fetchUploadsFiles();
-                    } else { showStatus(`转录失败: ${response.error || '未知错误'}`, 'danger'); }
-                },
-                error: (xhr) => showStatus(`转录失败: ${xhr.responseJSON ? xhr.responseJSON.error : '服务器连接失败'}`, 'danger'),
-                complete: () => { enableForms(); spinner.hide(); }
-            });
-        });
-        $('#translate-form').on('submit', function(e) {
-            e.preventDefault();
-            clearInterval(pollInterval);
-            const formData = new FormData(this);
-            disableForms();
-            $('#translate-progress-container').slideDown();
-            $('#translate-progress-bar').css('width', '0%').text('');
-            $.ajax({
-                url: '/translate', type: 'POST', data: formData, processData: false, contentType: false,
-                success: function(response) {
-                    if (response.task_id) { pollStatus(response.task_id); }
-                    else { showStatus(`任务启动失败: ${response.error || '未知错误'}`, 'danger'); enableForms(); }
-                },
-                error: (xhr) => { showStatus(`请求失败: ${xhr.responseText}`, 'danger'); enableForms(); }
-            });
-        });
-        $('#fetch-models-btn').on('click', function() {
-            const hostIp = $('#ollama-host').val().trim();
-            if (!hostIp) { showStatus('请输入Ollama Host IP', 'warning'); return; }
-            disableForms();
-            showStatus('正在获取模型...', 'info');
-            $.ajax({
-                url: '/get-ollama-models', type: 'POST', contentType: 'application/json', data: JSON.stringify({ host_ip: hostIp }),
-                success: function(response) {
-                    if (response.error) { showStatus(`获取模型失败: ${response.error}`, 'danger'); return; }
-                    const modelSelect = $('#ollama-model');
-                    modelSelect.empty().append('<option value="">请选择一个模型</option>');
-                    response.models.forEach(model => modelSelect.append(`<option value="${model}">${model}</option>`));
-                    showStatus('模型列表已更新！', 'success');
-                },
-                error: () => showStatus('获取模型失败，请检查IP。', 'danger'),
-                complete: () => enableForms()
-            });
-        });
+        
+        /**
+         * 轮询任务状态
+         * @param {string} taskId - 要轮询的任务ID
+         */
         function pollStatus(taskId) {
             pollInterval = setInterval(() => {
                 $.get(`/status/${taskId}`, data => {
@@ -267,13 +221,26 @@
                         $('#translate-progress-container').slideUp();
                         if (data.status === 'completed' && data.result) {
                             showStatus(`翻译成功: ${data.result.filename}`, 'success');
-                            fetchOutputsFiles(); fetchUploadsFiles();
-                        } else { showStatus(`翻译失败: ${data.error || '未知错误'}`, 'danger'); }
+                            fetchOutputsFiles(); 
+                            fetchUploadsFiles();
+                        } else { 
+                            showStatus(`翻译失败: ${data.error || '未知错误'}`, 'danger'); 
+                        }
                     }
-                }).fail(() => { clearInterval(pollInterval); enableForms(); showStatus('无法获取任务状态。', 'danger'); });
+                }).fail(() => { 
+                    clearInterval(pollInterval); 
+                    enableForms(); 
+                    showStatus('无法获取任务状态，请检查后端服务。', 'danger'); 
+                });
             }, 2000);
         }
-        setupFileManagement = function(type) {
+
+        /**
+         * 设置文件管理区域的功能 (加载、刷新、删除、清空)
+         * @param {string} type - 'outputs' 或 'uploads'
+         * @returns {function} 返回一个用于获取该类型文件的函数
+         */
+        function setupFileManagement(type) {
             const listId = `#${type}-file-list`;
             const refreshBtnId = `#refresh-${type}-btn`;
             const clearBtnId = `#clear-${type}-btn`;
@@ -282,6 +249,7 @@
             const clearUrl = `/clear-${type}`;
             const deleteUrlPrefix = `/delete-${type}-file/`;
             const downloadUrlPrefix = `/${type}-download/`;
+            
             const fetchFiles = () => {
                 const fileList = $(listId);
                 fileList.html('<li class="list-group-item text-muted">正在加载...</li>');
@@ -297,15 +265,19 @@
                                 <li class="list-group-item">
                                     <span><i class="bi bi-file-earmark-text me-2"></i>${filename}</span>
                                     <div class="btn-group">
-                                        <a href="${downloadUrlPrefix}${filename}" class="btn btn-sm btn-outline-success"><i class="bi bi-download"></i></a>
+                                        <a href="${downloadUrlPrefix}${filename}" class="btn btn-sm btn-outline-success" download><i class="bi bi-download"></i></a>
                                         <button class="btn btn-sm btn-outline-danger ${deleteBtnClass}" data-filename="${filename}"><i class="bi bi-trash"></i></button>
                                     </div>
                                 </li>`);
                         });
-                    } else { fileList.html(`<li class="list-group-item text-muted">文件夹为空。</li>`); }
-                }).fail(() => fileList.html(`<li class="list-group-item list-group-item-danger">无法加载。</li>`));
+                    } else { 
+                        fileList.html(`<li class="list-group-item text-muted">文件夹为空。</li>`); 
+                    }
+                }).fail(() => fileList.html(`<li class="list-group-item list-group-item-danger">无法加载文件列表，请检查后端服务。</li>`));
             };
+            
             $(refreshBtnId).on('click', fetchFiles);
+            
             $(clearBtnId).on('click', () => {
                 if (confirm(`您确定要清空 ${type} 文件夹吗？此操作不可恢复！`)) {
                     $.post(clearUrl, response => {
@@ -314,6 +286,8 @@
                     }).fail(() => showStatus('操作失败，服务器无响应。', 'danger'));
                 }
             });
+            
+            // 使用事件委托，因为列表项是动态生成的
             $(listId).on('click', `.${deleteBtnClass}`, function() {
                 const filename = $(this).data('filename');
                 if (confirm(`您确定要删除文件 "${filename}" 吗？`)) {
@@ -323,8 +297,109 @@
                     }).fail(() => showStatus('操作失败，服务器无响应。', 'danger'));
                 }
             });
+            
             return fetchFiles;
         }
+
+        // --- 事件处理器绑定 ---
+        
+        $('#transcribe-form').on('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const spinner = $(this).find('.spinner-border');
+            disableForms();
+            spinner.show();
+            
+            $.ajax({
+                url: '/transcribe', 
+                type: 'POST', 
+                data: formData, 
+                processData: false, 
+                contentType: false,
+                success: function(response) {
+                    if (response.success) {
+                        showStatus(`转录成功: ${response.filename}`, 'success');
+                        fetchOutputsFiles(); 
+                        fetchUploadsFiles();
+                    } else { 
+                        showStatus(`转录失败: ${response.error || '未知错误'}`, 'danger'); 
+                    }
+                },
+                error: (xhr) => showStatus(`转录请求失败: ${xhr.responseJSON ? xhr.responseJSON.error : '服务器连接失败'}`, 'danger'),
+                complete: () => { 
+                    enableForms(); 
+                    spinner.hide(); 
+                }
+            });
+        });
+
+        $('#translate-form').on('submit', function(e) {
+            e.preventDefault();
+            clearInterval(pollInterval);
+            const formData = new FormData(this);
+            disableForms();
+            $('#translate-progress-container').slideDown();
+            $('#translate-progress-bar').css('width', '0%').text('');
+            
+            $.ajax({
+                url: '/translate', 
+                type: 'POST', 
+                data: formData, 
+                processData: false, 
+                contentType: false,
+                success: function(response) {
+                    if (response.task_id) { 
+                        pollStatus(response.task_id); 
+                    } else { 
+                        showStatus(`任务启动失败: ${response.error || '未知错误'}`, 'danger'); 
+                        enableForms(); 
+                    }
+                },
+                error: (xhr) => { 
+                    showStatus(`翻译请求失败: ${xhr.responseText}`, 'danger'); 
+                    enableForms(); 
+                }
+            });
+        });
+        
+        $('#fetch-models-btn').on('click', function() {
+            const hostIp = $('#ollama-host').val().trim();
+            if (!hostIp) { 
+                showStatus('请输入Ollama Host IP地址', 'warning'); 
+                return; 
+            }
+            disableForms();
+            showStatus('正在从Ollama获取模型列表...', 'info');
+            
+            $.ajax({
+                url: '/get-ollama-models', 
+                type: 'POST', 
+                contentType: 'application/json', 
+                data: JSON.stringify({ host_ip: hostIp }),
+                success: function(response) {
+                    if (response.error) { 
+                        showStatus(`获取模型失败: ${response.error}`, 'danger'); 
+                        return; 
+                    }
+                    const modelSelect = $('#ollama-model');
+                    modelSelect.empty().append('<option value="" disabled selected>请选择一个模型</option>');
+                    response.models.forEach(model => modelSelect.append(`<option value="${model}">${model}</option>`));
+                    showStatus('模型列表已成功更新！', 'success');
+                },
+                error: () => showStatus('获取模型失败，请检查Ollama Host IP是否正确以及服务是否正在运行。', 'danger'),
+                complete: () => enableForms()
+            });
+        });
+
+        // --- 初始化 ---
+        
+        // **修正点**: 将 `setupFilemanagement` 改为 `setupFileManagement`
+        const fetchOutputsFiles = setupFileManagement('outputs');
+        const fetchUploadsFiles = setupFileManagement('uploads');
+        
+        // 页面加载时自动获取文件列表
+        fetchOutputsFiles();
+        fetchUploadsFiles();
     });
     </script>
 </body>
